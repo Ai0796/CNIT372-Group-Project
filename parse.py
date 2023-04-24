@@ -164,5 +164,5 @@ if __name__ == "__main__":
     for index, row in df.iterrows():
         initStr.append(subscriptionsInsert.format(formatString(row['Channel Id']), formatString(row['Channel Title']), formatString(row['Channel Url'])))
         
-    with open('init.sql', 'w', encoding='utf16') as f:
+    with open('init.sql', 'w', encoding='utf8') as f:
         f.write('\n'.join(initStr))
