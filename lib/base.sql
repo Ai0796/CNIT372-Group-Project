@@ -23,7 +23,7 @@ CREATE TABLE watch_history(
 CREATE TABLE search_history(
     searchQuery VARCHAR2(255) NOT NULL,
     searchDate TIMESTAMP NOT NULL,
-    searchURL VARCHAR2(100),
+    searchURL VARCHAR2(255),
     PRIMARY KEY (searchURL, searchDate)
 );
 

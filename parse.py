@@ -83,7 +83,7 @@ def parse_watch_history_file(p):
       
     ##Limit to around 1000 videos to prevent running too long
     if len(data) > 1000:
-        data = [x for i, x in enumerate(data) if i % int((len(data)/10)) == 0]
+        data = [x for i, x in enumerate(data) if i % int((len(data)/1000)) == 0]
         
     for watch in tqdm(data):
         try:
@@ -114,8 +114,9 @@ def parse_search_history_file(p):
             pass
         
 def formatString(string):
+    string = string.replace("'", "''")
     string = string.replace("&", "' || chr(38) || '")
-    return string.replace("'", "''")
+    return string
 
 if __name__ == "__main__":
     
@@ -161,7 +162,7 @@ if __name__ == "__main__":
     df = pd.read_csv(subscriptionsPath)
     
     for index, row in df.iterrows():
-        initStr.append(subscriptionsInsert.format(formatString(row['Channel Id']), formatString(row['Channel Url']), formatString(row['Channel Title'])))
+        initStr.append(subscriptionsInsert.format(formatString(row['Channel Id']), formatString(row['Channel Title']), formatString(row['Channel Url'])))
         
     with open('init.sql', 'w', encoding='utf16') as f:
         f.write('\n'.join(initStr))
