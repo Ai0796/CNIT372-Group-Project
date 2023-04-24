@@ -1,7 +1,6 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 import json
-import shutil
 
 import bs4
 import pandas as pd
@@ -46,7 +45,7 @@ def _extract_html_li_date(comment: str) -> datetime:
     if matches:
         g = matches.groups()
         year, month, day, hour, minute, second = tuple(map(int, g))
-        return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+        return str(datetime(year, month, day, hour, minute, second))
     else:
         raise RuntimeError(f"Couldn't parse date from {comment}")
 
@@ -63,7 +62,7 @@ def _parse_html_li(li: bs4.element.Tag):
             desc += str(tag.text)
     urls = list({link.attrs["href"]
                 for link in li.select("a") if "href" in link.attrs})
-    return desc.strip(), urls[1], parsed_date
+    return urls[1], urls[0], desc.strip()[:255], parsed_date.replace('T', ' ')
 
 
 def parse_html_comment_file(p):
@@ -81,19 +80,22 @@ def parse_watch_history_file(p):
     with open(p, "r", encoding='ISO-8859-1') as f:
         data = json.load(f)
         f.close()
-        
-    data = [x for i, x in enumerate(data) if i % 100 == 0]
+      
+    ##Limit to around 1000 videos to prevent running too long
+    if len(data) > 1000:
+        data = [x for i, x in enumerate(data) if i % int((len(data)/10)) == 0]
         
     for watch in tqdm(data):
         try:
-            title = watch['title']
+            title = watch['title'][7:]
             url = watch['titleUrl']
+            date = watch['time'][:-1].replace('T', ' ')
             channelName = watch['subtitles'][0]['name']
-            channleUrl = watch['subtitles'][0]['url']
+            channelUrl = watch['subtitles'][0]['url']
             video = YouTube(url)
-            yield title, url, channelName, channleUrl, video.length
+            yield title, url, channelName, channelUrl, date, video.length
         except:
-            pass
+            yield title, url, channelName, channelUrl, date, 'NULL'
         
 def parse_search_history_file(p):
     with open(p, "r", encoding='ISO-8859-1') as f:
@@ -102,19 +104,37 @@ def parse_search_history_file(p):
         
     for search in tqdm(data):
         try:
-            title = search['title']
-            url = search['time']
-            yield title, url
+            if search['title'].startswith('Watched'):
+                continue
+            title = search['title'][13:]
+            url = search['titleUrl']
+            date = search['time'][:-1].replace('T', ' ')
+            yield title, date, url
         except:
             pass
+        
+def formatString(string):
+    string = string.replace("&", "' || chr(38) || '")
+    return string.replace("'", "''")
 
 if __name__ == "__main__":
     
-    ##Parsing Comments
+    initStr = []
+    
     commentsPath = 'Takeout\\YouTube and YouTube Music\\my-comments\\my-comments.html'
     watchHistoryPath = 'Takeout\\YouTube and YouTube Music\\history\\watch-history.json'
     searchHistoryPath = 'Takeout\\YouTube and YouTube Music\\history\\search-history.json'
     subscriptionsPath = 'Takeout\\YouTube and YouTube Music\\subscriptions\\subscriptions.csv'
+    
+    commentInsert = 'INSERT INTO comments(commentURL, videoURL, commentText, commentDate) VALUES (\'{}\', \'{}\', \'{}\', TIMESTAMP \'{}\');'
+    watchHistoryInsert = 'INSERT INTO watch_history(title, videoURL, channelName, channelURL, watchDate, length) VALUES (\'{}\', \'{}\', \'{}\', \'{}\', TIMESTAMP \'{}\', {});'
+    searchHistoryInsert = 'INSERT INTO search_history(searchQuery, searchDate, searchURL) VALUES (\'{}\', TIMESTAMP \'{}\', \'{}\');'
+    subscriptionsInsert = 'INSERT INTO subscriptions(channelId, channelName, channelURL) VALUES (\'{}\', \'{}\', \'{}\');'
+    
+    with open('lib/base.sql', 'r') as f:
+        initStr.append(f.read())
+        initStr.append('\n')
+        f.close()
     
     comments = []
     urls = []
@@ -123,12 +143,7 @@ if __name__ == "__main__":
         if isinstance(data, Exception):
             print(data)
         else:
-            comments.append(data[0])
-            urls.append(data[1])
-            date.append(data[2])
-            
-    df = pd.DataFrame({'comment': comments, 'url': urls, 'date': date})
-    df.to_csv('my-comments.csv', index=False)
+            initStr.append(commentInsert.format(formatString(data[0]), formatString(data[1]), formatString(data[2]), data[3]))
     
     titles = []
     urls = []
@@ -136,22 +151,17 @@ if __name__ == "__main__":
     channelUrls = []
     videoLengths = []
     for data in parse_watch_history_file(watchHistoryPath):
-        titles.append(data[0])
-        urls.append(data[1])
-        channelNames.append(data[2])
-        channelUrls.append(data[3])
-        videoLengths.append(data[4])
-        
-    df = pd.DataFrame({'title': titles, 'url': urls, 'channelName': channelNames, 'channelUrl': channelUrls, 'videoLength': videoLengths})
-    df.to_csv('watch-history.csv', index=False)
+        initStr.append(watchHistoryInsert.format(formatString(data[0]), formatString(data[1]), formatString(data[2]), formatString(data[3]), data[4], data[5]))
     
     queries = []
     dates = []
     for data in parse_search_history_file(searchHistoryPath):
-        queries.append(data[0])
-        dates.append(data[1])
-        
-    df = pd.DataFrame({'query': queries, 'date': dates})
-    df.to_csv('search-history.csv', index=False)
+        initStr.append(searchHistoryInsert.format(formatString(data[0]), data[1], formatString(data[2])))
     
-    shutil.copyfile(subscriptionsPath, 'subscriptions.csv')
+    df = pd.read_csv(subscriptionsPath)
+    
+    for index, row in df.iterrows():
+        initStr.append(subscriptionsInsert.format(formatString(row['Channel Id']), formatString(row['Channel Url']), formatString(row['Channel Title'])))
+        
+    with open('init.sql', 'w', encoding='utf16') as f:
+        f.write('\n'.join(initStr))
